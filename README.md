@@ -43,19 +43,22 @@ The scope of this implementation is strictly bounded and touches the following f
 
 ### Environment Setup
 
-[Notes on setting up your local development environment - challenges you faced, how you solved them]
+Setting up the local development environment presented a multi-platform dependency constraint. The repository configuration locked `oxlint` to a Windows x64 binary, which caused standard `npm install` executions to fail immediately on macOS (Apple Silicon arm64). 
+
+To resolve this blocker, I bypassed npm by installing `pnpm` globally (`sudo npm install -g pnpm`) and utilizing `pnpm install`. This allowed the package manager to properly interpret the workspace configuration, bypass the rigid binary lock, and fetch the correct cross-platform binaries. The environment setup was successfully verified by running a clean compilation via `pnpm build`.
 
 ### Steps to Reproduce
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+1. Open the terminal and navigate to the coding agents source directory: `cd self/subcortex/coding-agents/src/`.
+2. Inspect the file tree and notice that there is no `openclaw-adapter.ts` file present in the directory.
+3. Open `self/subcortex/coding-agents/src/index.ts` and observe that no OpenClaw adapter module or runtime mapping is exported from the entry point.
+4. **Observed result:** Any external automated agent or workspace configuration attempting to initialize an OpenClaw subcortex bridge will fail immediately with a missing module runtime error due to unmapped contract methods and unresolvable file dependencies.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** [Link to commit in your fork]
-- **Screenshots/logs:** [If applicable]
-- **My findings:** [What you discovered during reproduction]
+- **Commit showing reproduction:** [https://github.com/DAmensah27/nous-core/tree/feature/openclaw-adapter](https://github.com/DAmensah27/nous-core/tree/feature/openclaw-adapter)
+- **Screenshots/logs:** *[N/A - Structural codebase gap verified via terminal inspection]*
+- **My findings:** During the reproduction process, I verified that `self/subcortex/coding-agents/src/` contains no integration architecture or software adapter layer for the OpenClaw framework. Furthermore, inspecting `src/index.ts` confirmed that no such module is exported. This layout confirms that any system call attempting to pass execution contexts to an OpenClaw pipeline will drop cleanly and crash.
 
 ---
 
@@ -63,11 +66,11 @@ The scope of this implementation is strictly bounded and touches the following f
 
 ### Analysis
 
-[Your analysis of the root cause - what's causing the issue?]
+The root cause of the issue is that the `nous-core` platform completely lacks an integration layer or runtime adapter for the OpenClaw framework. Because `self/subcortex/coding-agents/src/index.ts` does not export an OpenClaw module and no corresponding handler file exists in the directory, the core engine cannot communicate with external OpenClaw agents, breaking compatibility.
 
 ### Proposed Solution
 
-[High-level description of your fix approach]
+I will implement a dedicated `openclaw-adapter.ts` module within the coding-agents source directory. This file will fulfill the project's shared `AgentAdapter` contract, handling proper initialization, API communication, and response lifecycle structures. I will then export this module from the main entry point to expose it cleanly to the rest of the workspace application.
 
 ### Implementation Plan
 
@@ -75,18 +78,18 @@ Using UMPIRE framework (adapted):
 
 **Understand:** The `nous-core` platform lacks an integration layer for OpenClaw, resulting in crashes due to missing contract methods and dependencies.
 
-**Match:** Check existing adapters inside `self/subcortex/coding-agents/src/` to follow established design patterns for the `AgentAdapter` contract and Zod validation structures.
+**Match:** Check existing adapters inside `self/subcortex/coding-agents/src/` (such as `anthropic-adapter.ts` or other active core adapters) to follow established design patterns for the `AgentAdapter` contract and Zod validation structures.
 
-**Plan:** [Step-by-step implementation plan]
-1. [Modify file X to do Y]
-2. [Add function Z]
-3. [Update tests]
+**Plan:** 1. Create a new file named `openclaw-adapter.ts` inside the `self/subcortex/coding-agents/src/` directory.
+2. Implement the core lifecycle methods, TypeScript interfaces, and data parsing hooks dictated by the shared `AgentAdapter` type definition.
+3. Add a clean export statement for the new OpenClaw adapter file inside the central entry point `self/subcortex/coding-agents/src/index.ts`.
+4. Run `pnpm build` to verify workspace compilation and ensure no type breakages occur.
 
-**Implement:** [Link to your branch/commits as you work]
+**Implement:** [Branch Link](https://github.com/DAmensah27/nous-core/tree/feature/openclaw-adapter)
 
-**Review:** [Self-review checklist - does it follow the project's contribution guidelines?]
+**Review:** I will verify compliance with the repository's `CONTRIBUTING.md` guidelines, ensuring strict type safety declarations, clean documentation formatting standards, and proper linting configurations.
 
-**Evaluate:** [How will you verify it works?]
+**Evaluate:** I will execute full workspace compilation checks via `pnpm build` and write targeted adapter validation unit tests inside the `__tests__` directory to ensure perfect operational runtime stability without regressions.
 
 ---
 
