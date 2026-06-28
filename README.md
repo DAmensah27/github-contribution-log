@@ -4,7 +4,7 @@
 **Contribution Number:** 1  
 **Student:** Darin Andoh-Mensah  
 **Issue:** [orthogonalhq/nous-core #299](https://github.com/orthogonalhq/nous-core/issues/299)  
-**Status:** Phase III Complete  
+**Status:** Phase IV — PR #402 open, awaiting review  
 
 ---
 
@@ -188,15 +188,37 @@ Run from `self/subcortex/providers`:
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when submitted]
+**PR Link:** [orthogonalhq/nous-core #402](https://github.com/orthogonalhq/nous-core/pull/402) (against `feat/contributor-friendly-inference-provider-surface`)
 
-**PR Description:** [Draft or final PR description - much of the content above can be adapted]
+**PR Description:**
+
+> ### Add an OpenClaw CLI provider leaf
+>
+> **What & why.** `nous-core` routes to external models and agents through certified **provider leaves** under `self/subcortex/providers/src/providers/`. The catalog ships leaves for `anthropic`, `openai`, `ollama`, and the `codex-cli` command-line agent, but there is **no leaf for OpenClaw** — so the platform has no supported way to run OpenClaw as a provider (issue #299). OpenClaw is a CLI agent, so it belongs to the same family as `codex-cli` and uses the **`agent-cli` protocol** (spawn a local process, send a prompt, read the response) rather than an HTTP API.
+>
+> **What this PR adds.** A production-grade `openclaw` leaf modeled on the `codex-cli` reference:
+> - Five-file leaf under `self/subcortex/providers/src/providers/openclaw/` (`definition`, `adapter`, `implementation`, `provider`, `index`).
+> - Declares metadata via `ProviderDefinitionLeaf` with the provider ID **derived from `vendorKey`**, `protocol: 'agent-cli'`, `providerClass: 'local_text'`, `isLocal: true`, and `executionCapabilityProfile: 'session_bound_command'` (a one-shot headless exec, not a long-lived process).
+> - Speaks the `agent-cli` contract: a non-interactive `openclaw run --headless --no-color` invocation, prompt delivered over **stdin**, response read back from **stdout**, with an optional `--model` flag, env-var executable overrides (`NOUS_OPENCLAW_CLI_BIN` → `OPENCLAW_CLI_BIN` → `openclaw`), streaming via stdout transcript chunks, and CLI failures mapped to typed `NousError`s.
+> - Auto-discovered by the provider codegen; the generated aggregates (`provider-definitions.ts` / `provider-adapters.ts` / `provider-factories.ts`) are regenerated, not hand-edited.
+>
+> **Testing.** A focused suite (`src/__tests__/providers/openclaw.test.ts`) drives all CLI execution through an injected fake runner (`createFakeAgentCliRunner`) so unit tests never shell out, plus live-process tests that exercise the real spawn path. `pnpm build` is clean and the full provider package suite passes with no regressions.
+>
+> **Scope note.** Built against `feat/contributor-friendly-inference-provider-surface` (the CLI-provider machinery does not exist on `main`). Per the 2026-06-18 maintainer update on #299, this intentionally targets the new provider-leaf contract rather than the superseded `AgentAdapter` / `coding-agents` path.
 
 **Maintainer Feedback:**
-- [Date]: [Summary of feedback received]
-- [Date]: [How you addressed it]
 
-**Status:** [Awaiting review / Iterating / Approved / Merged]
+- **2026-06-22 — Changes requested (early-access provider integration review).** The maintainer confirmed the overall provider-leaf shape is correct (agent-cli path, right metadata, `executionCapabilityProfile: 'session_bound_command'`, generated catalog updates, focused fake-runner tests) and requested two changes before merge:
+  1. **Windows command-injection risk.** The process runner passed the user-controllable `config.modelId` into CLI args (`['--model', this.config.modelId]`) and spawned with `shell: platform === 'win32'`. On Windows that routes user-controlled values through `cmd.exe`, where shell metacharacters in a model id could be interpreted instead of treated as a literal argument. Requested fix: avoid `shell: true` and spawn with literal argv semantics; handle any Windows `.cmd` resolution without letting model-id/prompt-derived values reach the shell.
+  2. **Abort handling only worked pre-start.** The implementation snapshotted the abort state (`{ aborted: request.abortSignal.aborted }`) before spawn and only checked it before launching. Once `openclaw` was running, later cancellation did not kill the child, so a canceled request could run to completion or timeout — contradicting the PR's claim that abort signals are supported. Requested fix: either wire the abort signal to terminate the child after spawn, or narrow the claim/tests to pre-start-only.
+  - *(Non-blocking, maintainer-side follow-up they flagged: some persistent-chat guardrails still look Codex-specific and should become generic for agent-cli providers. They are handling this as provider-surface work; nothing required from this PR.)*
+
+- **2026-06-28 — Addressed both requested changes.**
+  1. **Shell-safe spawning.** Removed `shell: platform === 'win32'`; the process runner now always spawns with `shell: false` and passes arguments as a **literal argv array**, so the model id and prompt-derived values can never be interpreted by a shell. Added `planOpenClawSpawn`, which resolves the executable per platform: POSIX and native Windows binaries are spawned directly, while a Windows `.cmd`/`.bat` shim (which Node refuses to spawn without a shell) is routed through `cmd.exe /d /s /c` with **every argument explicitly escaped** (`windowsVerbatimArguments: true`) rather than relying on the shell to join the command line. On Windows the bare `openclaw` name is resolved via `where.exe`, preferring a native `.exe`/`.com` over a `.cmd` shim. New tests assert literal argv passthrough for a metacharacter-laden model id and cover the `.cmd` escaping and `.exe`-preference branches.
+  2. **Live abort.** The provider now forwards the real `AbortSignal` to the runner (alongside the pre-start snapshot the shared contract expects). After spawn the runner registers an `abort` listener that kills the child with `SIGTERM` and resolves the run as a failure, with the listener and timeout cleaned up on settle. New live-process tests confirm a post-start abort terminates the child promptly (not at timeout) and that a pre-start abort still short-circuits without spawning. The "abort supported" claim is now accurate for both pre- and post-start cancellation.
+  - *Verification:* `pnpm build` clean; full provider suite **321 passing / 2 skipped**; OpenClaw suite **16/16**.
+
+**Status:** Awaiting review (fixes implemented + verified 2026-06-28; pending push to update PR #402)
 
 ---
 
