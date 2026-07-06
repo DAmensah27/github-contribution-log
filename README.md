@@ -4,7 +4,7 @@
 **Contribution Number:** 1  
 **Student:** Darin Andoh-Mensah  
 **Issue:** [orthogonalhq/nous-core #299](https://github.com/orthogonalhq/nous-core/issues/299)  
-**Status:** Phase IV — PR #402 open, awaiting review  
+**Status:** ✅ Complete — PR #402 merged (2026-07-05)  
 
 ---
 
@@ -218,7 +218,9 @@ Run from `self/subcortex/providers`:
   2. **Live abort.** The provider now forwards the real `AbortSignal` to the runner (alongside the pre-start snapshot the shared contract expects). After spawn the runner registers an `abort` listener that kills the child with `SIGTERM` and resolves the run as a failure, with the listener and timeout cleaned up on settle. New live-process tests confirm a post-start abort terminates the child promptly (not at timeout) and that a pre-start abort still short-circuits without spawning. The "abort supported" claim is now accurate for both pre- and post-start cancellation.
   - *Verification:* `pnpm build` clean; full provider suite **321 passing / 2 skipped**; OpenClaw suite **16/16**.
 
-**Status:** Awaiting review (fixes implemented + verified 2026-06-28; pending push to update PR #402)
+- **2026-07-05 — Merged (initial early-access OpenClaw provider integration).** The maintainer confirmed the final version lands OpenClaw as an `agent-cli` provider leaf with the expected `session_bound_command` metadata, generated provider-catalog wiring, package exports, focused fake-runner coverage, the Windows spawn hardening, and live abort handling. They resolved the final merge conflict on their side as **maintainer-side provider-roster/catalog churn** — additive conflict resolution from other provider leaves landing on the integration branch, not a contributor-side issue with this PR. The remaining generic `agent-cli` / persistent-chat guardrail cleanup is tracked separately so this contribution stays focused.
+
+**Status:** ✅ Merged — 2026-07-05 ([PR #402](https://github.com/orthogonalhq/nous-core/pull/402))
 
 ---
 
@@ -226,20 +228,32 @@ Run from `self/subcortex/providers`:
 
 ### Technical Skills Gained
 
-[What you learned technically]
+- **Building to a plugin contract instead of a bespoke integration.** The biggest shift was learning to implement a *certified provider leaf* — a small, self-contained module that conforms to a shared contract (`ProviderDefinitionLeaf`, the `agent-cli` protocol, a `vendorKey`-derived provider ID, a declared `executionCapabilityProfile`) so the platform can discover, construct, and route to it uniformly. Modeling the leaf on the existing `codex-cli` reference taught me how to read a certified pattern and reproduce its shape rather than inventing my own.
+- **Code-generated catalogs and "do not hand-edit" boundaries.** The provider catalog (`provider-definitions.ts` / `provider-adapters.ts` / `provider-factories.ts`) is produced by a generator that scans the providers directory. I learned to add the leaf's four required files and run `generate:providers` to register it, keeping `--check` green, instead of editing generated output — and why roster-coupled tests intentionally break as a tripwire when a new vendor is added.
+- **The `agent-cli` process model.** Driving a CLI agent as a provider: a non-interactive `openclaw run --headless --no-color` invocation, prompt over **stdin**, response over **stdout**, streaming via transcript chunks, env-var executable resolution, and mapping CLI failures to typed `NousError`s.
+- **Secure child-process spawning.** The review taught me the concrete mechanics of shell injection on Windows: how `shell: true` joins arguments into a single `cmd.exe` command line where metacharacters get interpreted, and how to avoid it by spawning with `shell: false` and a **literal argv array**, resolving the executable myself, and routing `.cmd`/`.bat` shims through `cmd.exe` with each argument explicitly escaped.
+- **Correct cancellation semantics.** The difference between a *snapshot* of an abort state (checked once before spawn) and a *live* `AbortSignal` wired to actually kill the running child — including cleaning up the listener and timeout on settle so nothing leaks.
+- **Deterministic, offline testing of process code.** Using an injected fake runner (`createFakeAgentCliRunner`) for the unit suite so tests never shell out, plus a few live-process tests (spawning real `node`) to prove literal-argv passthrough and post-start abort.
 
 ### Challenges Overcome
 
-[What was hard and how you solved it]
+- **A stale issue scope.** Issue #299 was originally written against the deprecated `AgentAdapter` / `coding-agents` path. A maintainer update redirected it to the new CLI provider-leaf contract on the `feat/contributor-friendly-inference-provider-surface` integration branch. I resolved this by following the maintainer note, rebasing onto the integration branch (where all the CLI-provider machinery lives — none of it exists on `main`), and treating `codex-cli` as the source-of-truth pattern.
+- **Security review feedback.** My first version inherited two flaws from the reference pattern: a Windows shell-injection vector (user-controlled `modelId` passed through `shell: true`) and abort handling that only worked *before* the process started. Rather than doing the minimum, I fully wired live abort and rebuilt the spawn path to be shell-safe on every platform, then added focused tests for each so the "abort supported" claim became accurate.
+- **Working in a busy, generated area.** The provider catalog and roster assertions are touched by every new provider leaf, so the final merge hit conflicts from other leaves landing on the integration branch. The maintainer handled that as additive roster/catalog churn on their side — a reminder that generated, roster-coupled surfaces are naturally conflict-prone and that keeping the leaf's own files clean and regenerating the catalog is what keeps a contribution mergeable.
 
 ### What I'd Do Differently Next Time
 
-[Reflection on your process]
+- **Read the reference pattern *and* its known weaknesses first.** I copied `codex-cli`'s spawn/abort shape faithfully — which also copied its latent shell-injection and pre-start-only abort issues. Next time I'll treat "the reference does it this way" as a starting point, not a guarantee, and run a security lens over child-process and user-input handling *before* review.
+- **Verify environment assumptions earlier.** I lost a little time to node's `-e` argument parsing (`--model` being read as a node flag) while writing the live-process tests. Confirming how the harness passes argv up front would have saved a debug cycle.
+- **Confirm the target contract before writing code.** The scope pivot from `AgentAdapter` to the provider-leaf contract could have cost a lot more if caught late; checking issue comments for maintainer updates before starting is now part of my process.
 
 ---
 
 ## Resources Used
 
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
+- **The `codex-cli` provider leaf** (`self/subcortex/providers/src/providers/codex-cli/`) — the certified reference pattern this contribution was modeled on.
+- **In-repo contracts** — the `agent-cli` protocol (`src/protocols/agent-cli/`), the `ProviderDefinitionLeaf` schema (`src/schemas/provider-definition.ts`), and the `vendorKey → providerId` derivation (`src/provider-identity.ts`).
+- **`orthogonalhq/nous-core` #299** and the maintainer's scope-pivot comment redirecting the work to the provider-leaf contract on the integration branch.
+- **`CONTRIBUTING.md`** — Node 22+ / pnpm 10+ toolchain, strict-typing and metadata-only definition rules, and the `generate:providers --check` requirement.
+- **Node.js `child_process` docs** — `spawn` options (`shell`, `windowsVerbatimArguments`, `windowsHide`) and the Windows `.cmd`/`.bat` spawning restrictions that informed the shell-injection fix.
+- **PR #402 review thread** — the maintainer's two requested changes (Windows spawn hardening, live abort) and the merge confirmation.
