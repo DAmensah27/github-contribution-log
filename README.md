@@ -257,3 +257,194 @@ Run from `self/subcortex/providers`:
 - **`CONTRIBUTING.md`** — Node 22+ / pnpm 10+ toolchain, strict-typing and metadata-only definition rules, and the `generate:providers --check` requirement.
 - **Node.js `child_process` docs** — `spawn` options (`shell`, `windowsVerbatimArguments`, `windowsHide`) and the Windows `.cmd`/`.bat` spawning restrictions that informed the shell-injection fix.
 - **PR #402 review thread** — the maintainer's two requested changes (Windows spawn hardening, live abort) and the merge confirmation.
+
+---
+---
+
+# Contribution [2]: [AI Provider type safety — replace `any` with `LanguageModel`]
+
+**Contribution Number:** 2  
+**Student:** Darin Andoh-Mensah  
+**Issue:** [Vets-Who-Code/vets-who-code-app #879](https://github.com/Vets-Who-Code/vets-who-code-app/issues/879)  
+**Status:** 🔨 Phase III In Progress — fix implemented, verified, and pushed to fork; PR ready to submit  
+
+---
+
+## Why I Chose This Issue
+
+After a heavy, architecture-first contribution (the OpenClaw provider leaf in #299), I wanted a focused, self-contained issue in a domain I care about — a well-scoped TypeScript type-safety task in a real production Next.js codebase. This issue is labeled `beginner` / `good first issue` / `type-safety` / `typescript`, which made it a good fit for learning a new repo's conventions quickly without a large surface area. It also supports a mission I connect with: #VetsWhoCode builds software to help military veterans and spouses learn to code.
+
+More concretely, I chose it because "replace `any` with a proper type" is deceptively educational: doing it *correctly* means researching the real type the AI SDK expects, understanding how the model instances flow through the code, and proving the change compiles without weakening the public API — exactly the kind of careful, type-driven reasoning I want to get faster at.
+
+---
+
+## Understanding the Issue
+
+### Problem Description
+
+`src/lib/ai-provider.ts` is a small utility that initializes the project's AI providers (Google Gemini, Azure OpenAI, OpenAI, and Phi-3) and exposes helpers to pick a primary provider and run an operation with automatic fallback. It uses the `any` type in three places, which turns off TypeScript's type checking exactly where the model object is passed around — so mistakes using the model would not be caught at compile time, and editors give no autocomplete.
+
+### Expected Behavior
+
+The three `any` types are replaced with the proper type from the AI SDK, so the provider instance and the fallback helpers are fully type-checked, and TypeScript still compiles.
+
+### Current Behavior
+
+Three untyped `any` values (line numbers on `master` at the time of work):
+
+- **Line 10** — `instance: any;` in the `ProviderConfig` interface (the constructed model object).
+- **Line 134** — `model: any;` in the return type of `getAIModelWithFallback()`.
+- **Line 164** — `operation: (model: any) => Promise<T>` — the callback parameter of `tryProvidersWithFallback<T>()`.
+
+All three refer to the **same underlying thing**: the model instance returned by `google("…")`, `azureProvider("…")`, `openai("…")`, i.e. the value stored in `ProviderConfig.instance` and later handed to the caller's operation.
+
+### Affected Components
+
+- **Only file changed:** `src/lib/ai-provider.ts` (three `any` sites + one import).
+- **Type source (read-only):** the `ai` package's `LanguageModel` type (AI SDK v5) and, transitively, `@ai-sdk/provider`'s `LanguageModelV2`.
+- **Providers referenced:** `@ai-sdk/openai`, `@ai-sdk/azure`, `@ai-sdk/google` — the factories whose return value is being typed.
+
+---
+
+## Reproduction Process
+
+### Environment Setup
+
+- **Toolchain:** Node 24, npm (the repo uses `package-lock.json`; scripts `typecheck` = `tsc -p tsconfig.json` and `lint` = `biome lint`).
+- **Setup:** forked `Vets-Who-Code/vets-who-code-app`, cloned the fork, and ran `npm install` (~1,800 packages).
+- **Challenge solved:** the machine's global npm cache had root-owned files (`EACCES`), so `npm install` initially failed. Worked around it by pointing npm at a project-local cache dir (`npm install --cache <local-cache>`) rather than needing `sudo`.
+
+### Steps to Reproduce (the type-safety gap)
+
+1. Open `src/lib/ai-provider.ts` on `master`.
+2. `grep -n ": any" src/lib/ai-provider.ts` → three hits (lines 10, 134, 164).
+3. **Observed result:** the model instance flows through `ProviderConfig.instance` → `getAIModelWithFallback()` → `tryProvidersWithFallback()` entirely as `any`, so no type checking or editor assistance exists on the model object anywhere in the file.
+
+### Reproduction Evidence
+
+- **Fork:** [`DAmensah27/vets-who-code-app`](https://github.com/DAmensah27/vets-who-code-app)
+- **Findings:** confirmed all three `any` sites describe the *same* model type, so a single imported type applied in three places resolves the whole issue — no runtime code paths change.
+
+---
+
+## Solution Approach
+
+### Analysis
+
+The root cause is simply that the model object's type was never declared. The `@ai-sdk/*` factories return a concrete model instance; in AI SDK v5 (`ai@^5.0.93`, `@ai-sdk/openai@^2.0.67`) `openai("gpt-4-turbo")` returns a `LanguageModelV2` (verified in `@ai-sdk/openai`'s `.d.ts`: `(modelId): LanguageModelV2`). So all three `any`s should be that model type.
+
+**Research finding (a subtlety in the issue text):** the issue suggested importing `LanguageModel` from `@ai-sdk/provider`. In this repo's installed v5, `@ai-sdk/provider` actually exports `LanguageModelV2` (not `LanguageModel`), and it is only a **transitive** dependency — importing from it would be fragile. The **`ai`** package *is* a direct dependency and exports `LanguageModel = string | LanguageModelV2`, which the concrete `LanguageModelV2` instances satisfy, and which is exactly the type AI SDK functions like `generateText({ model })` consume. So the idiomatic, robust choice is `LanguageModel` from `ai`.
+
+### Proposed Solution
+
+Add `import type { LanguageModel } from "ai";` and replace all three `any`s with `LanguageModel`. Type-only change; no runtime behavior changes.
+
+### Implementation Plan
+
+Using the UMPIRE framework (adapted):
+
+**Understand:** three `any` sites in `ai-provider.ts` all describe the AI SDK model instance; typing them restores compile-time safety with no behavior change.
+
+**Match:** follow the AI SDK's own public typing — `LanguageModel` from `ai` is the type the SDK exposes for a model, so consumers should use it rather than reaching into the transitive `@ai-sdk/provider`.
+
+**Plan:**
+1. Fork + clone + `npm install`; establish a clean `npm run typecheck` baseline.
+2. Import `LanguageModel` from `ai`.
+3. Replace the three `any`s (`ProviderConfig.instance`, the `getAIModelWithFallback()` return `model`, the `tryProvidersWithFallback()` `operation` param).
+4. Run `npm run typecheck` and `npx biome lint` on the file.
+5. Commit on a topic branch, push to the fork, open a PR to upstream `master`.
+
+**Implement:** [`fix/879-ai-provider-types`](https://github.com/DAmensah27/vets-who-code-app/tree/fix/879-ai-provider-types) — commit `394e5c4`.
+
+**Review:** self-checked against the acceptance criteria — correct `@ai-sdk` type researched, all three `any`s replaced, `tsc` compiles, no runtime paths touched; commit message conforms to the repo's commitlint config (`refactor` type, sentence-case subject, ≤72-char header).
+
+**Evaluate:** `npm run typecheck` exits 0 with no errors; `biome lint` on the file is clean apart from a pre-existing, unrelated warning. *(Results in Testing Strategy below.)*
+
+---
+
+## Testing Strategy
+
+This is a **type-only** change (the `LanguageModel` annotation is erased at compile time), so there is no new runtime behavior to unit-test; correctness is proven by the type checker and linter.
+
+### Verification
+
+- [x] `grep -n ": any" src/lib/ai-provider.ts` → **no matches remaining**.
+- [x] `npm run typecheck` (`tsc -p tsconfig.json`) → **exit 0, no errors**.
+- [x] `npx biome lint src/lib/ai-provider.ts` → clean, except one **pre-existing, unrelated** warning (`await` inside a loop at line 177 of the original file — not introduced by this change).
+- [x] Diff review → exactly one added import + three `any → LanguageModel` replacements; no runtime code paths altered.
+
+### Manual Testing
+
+Confirmed the three usage sites still typecheck against how the value is used: the concrete `LanguageModelV2` instances (from `openai()`/`google()`/`azure()`) are assignable to `LanguageModel`, and the value continues to flow unchanged through `getAIModelWithFallback()` and `tryProvidersWithFallback()`.
+
+---
+
+## Implementation Notes
+
+### Progress Summary
+
+- **Researched the real type.** Read the installed `.d.ts` files to confirm the v5 return types and where `LanguageModel` vs `LanguageModelV2` actually live, rather than taking the issue's suggested import path at face value.
+- **Made the minimal correct change.** One import + three annotations; verified with `typecheck` + `lint`.
+- **Committed and pushed** to the fork on branch `fix/879-ai-provider-types` (commit `394e5c4`). PR to upstream is prepared and ready to open.
+
+### Challenges Faced
+
+- **The issue's suggested type was slightly off for this version.** It pointed at `LanguageModel` from `@ai-sdk/provider`; in v5 that package exports `LanguageModelV2` and is only transitive. Resolved by using `LanguageModel` from the `ai` direct dependency (documented above).
+- **npm cache permissions.** Root-owned files in the global npm cache blocked `npm install`; solved with a project-local `--cache` dir instead of `sudo`.
+- **Commit hooks.** The repo enforces commitlint via husky; the first commit was rejected for a non-sentence-case subject. Rewrote the message to conform (`refactor(...)`, sentence-case, ≤72 chars).
+
+### Code Changes
+
+- **File modified:** `src/lib/ai-provider.ts` — `+import type { LanguageModel } from "ai";` and three `any → LanguageModel` replacements.
+- **Branch:** [`fix/879-ai-provider-types`](https://github.com/DAmensah27/vets-who-code-app/tree/fix/879-ai-provider-types) (commit `394e5c4`).
+- **Approach decision:** use the AI SDK's public `LanguageModel` type from a direct dependency instead of the more specific `LanguageModelV2` from a transitive one — matches how the SDK is meant to be consumed and keeps the import robust to dependency changes.
+
+---
+
+## Pull Request
+
+**PR Link:** _Ready to submit — branch pushed to the fork; PR against `Vets-Who-Code/vets-who-code-app:master` pending._
+
+**PR Description (draft):**
+
+> ### Replace `any` with `LanguageModel` in the AI provider utility (#879)
+>
+> **What & why.** `src/lib/ai-provider.ts` used `any` in three places that all describe the same thing — the AI SDK model instance returned by `openai()`/`google()`/`azure()`. This PR types them with `LanguageModel` from the `ai` package (AI SDK v5), restoring compile-time safety and editor autocomplete with no runtime change.
+>
+> **Changes.** Added `import type { LanguageModel } from "ai";` and replaced the `any` on `ProviderConfig.instance`, the `getAIModelWithFallback()` return `model`, and the `tryProvidersWithFallback()` `operation` parameter.
+>
+> **Note on the type.** The issue suggested `LanguageModel` from `@ai-sdk/provider`, but in the installed v5 that package exports `LanguageModelV2` and is only a transitive dependency. `ai` (a direct dependency) exports `LanguageModel = string | LanguageModelV2`, which the concrete model instances satisfy and which is the type the SDK's own APIs consume — so I imported from `ai`.
+>
+> **Testing.** Type-only change; `npm run typecheck` passes with no errors and `biome lint` is clean on the file.
+
+**Maintainer Feedback:**
+- _(none yet — PR not yet opened)_
+
+**Status:** Ready to submit / Awaiting review
+
+---
+
+## Learnings & Reflections
+
+### Technical Skills Gained
+
+- **Verifying types from source, not docs.** Reading the installed `.d.ts` files (`@ai-sdk/openai`, `ai`, `@ai-sdk/provider`) to confirm what `openai()` actually returns and where each type is exported — and catching that the issue's suggested import didn't match the installed version.
+- **Direct vs. transitive dependencies.** Why importing a type from a transitive package is fragile, and how to prefer the equivalent type re-exported by a direct dependency.
+- **A new repo's guardrails.** Getting a clean `tsc`/`biome` baseline and satisfying a commitlint + husky commit-message policy.
+
+### Challenges Overcome
+
+- Diagnosed the `EACCES` npm-cache issue and worked around it without elevated permissions.
+- Reconciled the issue's suggested type with the repo's actual installed SDK version, choosing the correct, robust import.
+
+### What I'd Do Differently Next Time
+
+- Check the installed package versions and their exported types *before* accepting an issue's suggested import path — it saves a round-trip when the issue predates a dependency bump.
+
+---
+
+## Resources Used
+
+- **[Vets-Who-Code/vets-who-code-app #879](https://github.com/Vets-Who-Code/vets-who-code-app/issues/879)** — the issue, acceptance criteria, and the affected lines.
+- **Vercel AI SDK v5** — the `LanguageModel` / `LanguageModelV2` types (`ai` and `@ai-sdk/provider` type declarations) and the `@ai-sdk/openai`/`azure`/`google` provider factory return types.
+- **The repo's own config** — `tsconfig.json`, `biome` lint config, and `commitlint.config.js` (conventional-commits rules) that shaped the fix and the commit.
