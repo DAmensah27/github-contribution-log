@@ -266,7 +266,7 @@ Run from `self/subcortex/providers`:
 **Contribution Number:** 2  
 **Student:** Darin Andoh-Mensah  
 **Issue:** [Vets-Who-Code/vets-who-code-app #879](https://github.com/Vets-Who-Code/vets-who-code-app/issues/879)  
-**Status:** 🔨 Phase III In Progress — fix implemented, verified, and pushed to fork; PR ready to submit  
+**Status:** 🔨 Phase III In Progress — PR [#1242](https://github.com/Vets-Who-Code/vets-who-code-app/pull/1242) submitted, awaiting review  
 
 ---
 
@@ -385,7 +385,7 @@ Confirmed the three usage sites still typecheck against how the value is used: t
 
 - **Researched the real type.** Read the installed `.d.ts` files to confirm the v5 return types and where `LanguageModel` vs `LanguageModelV2` actually live, rather than taking the issue's suggested import path at face value.
 - **Made the minimal correct change.** One import + three annotations; verified with `typecheck` + `lint`.
-- **Committed and pushed** to the fork on branch `fix/879-ai-provider-types` (commit `394e5c4`). PR to upstream is prepared and ready to open.
+- **Committed and pushed** to the fork on branch `fix/879-ai-provider-types` (commit `394e5c4`), then **opened PR [#1242](https://github.com/Vets-Who-Code/vets-who-code-app/pull/1242)** against upstream `master`.
 
 ### Challenges Faced
 
@@ -403,7 +403,7 @@ Confirmed the three usage sites still typecheck against how the value is used: t
 
 ## Pull Request
 
-**PR Link:** _Ready to submit — branch pushed to the fork; PR against `Vets-Who-Code/vets-who-code-app:master` pending._
+**PR Link:** [Vets-Who-Code/vets-who-code-app #1242](https://github.com/Vets-Who-Code/vets-who-code-app/pull/1242) (against `master`)
 
 **PR Description (draft):**
 
@@ -418,9 +418,9 @@ Confirmed the three usage sites still typecheck against how the value is used: t
 > **Testing.** Type-only change; `npm run typecheck` passes with no errors and `biome lint` is clean on the file.
 
 **Maintainer Feedback:**
-- _(none yet — PR not yet opened)_
+- _(none yet — awaiting first review)_
 
-**Status:** Ready to submit / Awaiting review
+**Status:** Awaiting review
 
 ---
 
